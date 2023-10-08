@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torchvision.models import mobilenet_v3_small
 
+
 class LandmarkCNN(nn.Module):
     def __init__(self, num_landmarks):
         super().__init__()
@@ -14,9 +15,8 @@ class LandmarkCNN(nn.Module):
         return x.view(x.shape[0], -1, 2)  # reshape to (batch_size, num_landmarks, 2)
 
 
-
 # Define constants
-NUM_LANDMARKS = 68 # for example
+NUM_LANDMARKS = 68  # for example
 BATCH_SIZE = 16
 CHANNELS = 3
 HEIGHT = 112
