@@ -1,1 +1,1 @@
-from frvit.main import NaViT
+from frvit.max_vit import NaViT
