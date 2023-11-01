@@ -9,7 +9,9 @@ import torch.nn.functional as F
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.layers import DropPath, trunc_normal_
 from timm.models.registry import register_model
-from zeta.quant import QloraLinear
+
+# from zeta.quant import QloraLinear
+from frvit.sparse_vision_mha import MHA
 
 try:
     from mmcv.runner import _load_checkpoint
@@ -601,87 +603,6 @@ def convolutional_stem(
     )
 
 
-class MHSA(nn.Module):
-    """Multi-headed Self Attention module.
-
-    Source modified from:
-    https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
-    """
-
-    def __init__(
-        self,
-        dim: int,
-        head_dim: int = 32,
-        qkv_bias: bool = False,
-        attn_drop: float = 0.0,
-        proj_drop: float = 0.0,
-        qk_norm: bool = False,
-    ) -> None:
-        """Build MHSA module that can handle 3D or 4D input tensors.
-
-        Args:
-            dim: Number of embedding dimensions.
-            head_dim: Number of hidden dimensions per head. Default: ``32``
-            qkv_bias: Use bias or not. Default: ``False``
-            attn_drop: Dropout rate for attention tensor.
-            proj_drop: Dropout rate for projection tensor.
-        """
-        super().__init__()
-        assert dim % head_dim == 0, "dim should be divisible by head_dim"
-        self.head_dim = head_dim
-        self.num_heads = dim // head_dim
-        self.scale = head_dim**-0.5
-
-        # self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.qkv = QloraLinear(dim, dim * 3)
-
-        self.attn_drop = nn.Dropout(attn_drop)
-
-        # self.proj = nn.Linear(dim, dim)
-        self.proj = QloraLinear(dim, dim)
-
-        self.proj_drop = nn.Dropout(proj_drop)
-        
-        self.norm = nn.LayerNorm(dim)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        shape = x.shape
-        B, C, H, W = shape
-        N = H * W
-
-        # LayerNorm before self attention
-        x = self.norm(x)
-
-        if len(shape) == 4:
-            x = torch.flatten(x, start_dim=2).transpose(-2, -1)  # (B, N, C)
-        qkv = (
-            self.qkv(x)
-            .reshape(B, N, 3, self.num_heads, self.head_dim)
-            .permute(2, 0, 3, 1, 4)
-        )
-        q, k, v = qkv.unbind(0)  # make torchscript happy (cannot use tensor as tuple)
-
-
-        # qk normalization
-
-        if self.qk_norm:
-            q = self.norm(q)
-            k = self.norm(k)
-        
-
-        # trick here to make q@k.t more stable
-        attn = (q * self.scale) @ k.transpose(-2, -1)
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        if len(shape) == 4:
-            x = x.transpose(-2, -1).reshape(B, C, H, W)
-
-        return x
-
 
 class PatchEmbed(nn.Module):
     """Convolutional patch embedding layer."""
@@ -1103,7 +1024,7 @@ class RepMixerBlock(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    """Implementation of metaformer block with MHSA as token mixer.
+    """Implementation of metaformer block with MHA as token mixer.
 
     For more details on Metaformer structure, please refer to:
     `MetaFormer Is Actually What You Need for Vision <https://arxiv.org/pdf/2111.11418.pdf>`_
@@ -1136,7 +1057,7 @@ class AttentionBlock(nn.Module):
         super().__init__()
 
         self.norm = norm_layer(dim)
-        self.token_mixer = MHSA(dim=dim)
+        self.token_mixer = MHA(dim=dim)
 
         assert mlp_ratio > 0, "MLP ratio should be greater than 0, found: {}".format(
             mlp_ratio
@@ -1364,8 +1285,8 @@ class FastViT(nn.Module):
                 num_conv_branches=1,
             )
             self.head = (
-                # nn.Linear(int(embed_dims[-1] * cls_ratio), num_classes)
-                QloraLinear(int(embed_dims[-1] * cls_ratio), num_classes)
+                nn.Linear(int(embed_dims[-1] * cls_ratio), num_classes)
+                # QloraLinear(int(embed_dims[-1] * cls_ratio), num_classes)
                 if num_classes > 0
                 else nn.Identity()
             )

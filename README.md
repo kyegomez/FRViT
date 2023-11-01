@@ -8,6 +8,10 @@ An attempt to create the most accurate, reliable, and general vision transformer
 - QK Norm for stability
 - Sparse MultiHead Attention
 - Conditional inputs of image, text, or image text pairs
+- High generalization with low examples 1-2
+- Outragreously fast inference
+- Scalable architecture with minimal memory consumption
+
 
 
 ## Installation
